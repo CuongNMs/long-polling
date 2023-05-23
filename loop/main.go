@@ -3,30 +3,12 @@ package main
 import (
 	"fmt"
 	"github.com/labstack/echo/v4"
+	"longpolling/model"
 	"strconv"
 	"time"
 )
 
-type SendMessageRequest struct {
-	Message string `json:"message"`
-}
-
-type Update struct {
-	CreatedAt int64
-	Message string
-}
-
-func filter[T any](slice []T, f func(T) bool) []T {
-	var n []T
-	for _, e := range slice {
-		if f(e) {
-			n = append(n, e)
-		}
-	}
-	return n
-}
-
-func main()  {
+func main() {
 	//normal case
 	//q:=NewCappedQueue[string](10)
 	//e:=echo.New()
@@ -43,38 +25,39 @@ func main()  {
 	//})
 	//e.Logger.Fatal(e.Start(":8080"))
 
-
-	q := NewCappedQueue[Update](10)
-	e:=echo.New()
+	// use loop to check if server received new model
+	q := model.NewCappedQueue[model.Update](10)
+	e := echo.New()
 	e.GET("updates", func(c echo.Context) error {
 		lastUpdate := c.QueryParam("lastUpdate")
 		lastUpdateUnix, _ := strconv.ParseInt(lastUpdate, 10, 64)
-		var updates []Update
-		for{
-			updates = filter(q.Copy(), func(update Update) bool {
+		var updates []model.Update
+		for {
+			updates = model.Filter(q.Copy(), func(update model.Update) bool {
 				return update.CreatedAt > lastUpdateUnix
 			})
 			if len(updates) != 0 {
 				break
 			}
 			select {
-				case <- c.Request().Context().Done():
-				case <- time.After(time.Second):
+			case <-c.Request().Context().Done():
+			case <-time.After(time.Second):
 			}
 		}
-		return c.JSON(200,updates)
+		return c.JSON(200, updates)
 	})
 
 	e.POST("send", func(c echo.Context) error {
-			var request SendMessageRequest
-			if err:=c.Bind(&request); err != nil {
-				return c.String(400,fmt.Sprintf("Bad request: %v", err))
-			}
-			q.Append(Update{
-				CreatedAt: time.Now().Unix(),
-				Message: request.Message,
-			})
-			return c.JSON(201, "Request has sent")
+		var request model.SendMessageRequest
+		if err := c.Bind(&request); err != nil {
+			return c.String(400, fmt.Sprintf("Bad request: %v", err))
+		}
+		q.Append(model.Update{
+			CreatedAt: time.Now().Unix(),
+			Message:   request.Message,
+		})
+		return c.JSON(201, "Request has sent")
 	})
 	e.Logger.Fatal(e.Start(":8080"))
+
 }
